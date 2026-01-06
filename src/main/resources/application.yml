@@ -1,0 +1,62 @@
+server:
+  port: 8080
+  netty:
+    connection-timeout: 2s
+  shutdown: graceful
+
+spring:
+  application:
+    name: smart-api-gateway
+  threads:
+    virtual:
+      enabled: true
+  main:
+    keep-alive: true
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 1s
+      lettuce:
+        pool:
+          max-active: 50
+          max-idle: 10
+          min-idle: 2
+          max-wait: 500ms
+
+gateway-config:
+  global-timeout: 3s
+
+projects:
+  shop:
+    prefix: /shop
+    target-url: http://localhost:8081
+    timeout: 2s
+    
+    auth-type: JWT
+    jwt-secret: ${SHOP_JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
+    
+    public-paths:
+      - /shop/auth/login
+      - /shop/auth/register
+      - /shop/public/**
+
+    rate-limit:
+      capacity: 10
+      refill-rate: 10
+      
+  cms:
+    prefix: /cms
+    target-url: http://localhost:8082
+    timeout: 5s
+    
+    auth-type: SESSION
+    session-cookie: SESSION_ID
+    csrf-required: true
+    
+    public-paths:
+      - /cms/auth/login
+      
+    rate-limit:
+      capacity: 5
+      refill-rate: 2
