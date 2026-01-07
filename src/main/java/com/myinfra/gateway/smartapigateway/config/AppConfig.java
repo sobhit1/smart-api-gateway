@@ -36,13 +36,15 @@ public class AppConfig {
         private String targetUrl;
         private Duration timeout;
 
+        @NotNull
         private AuthType authType;
         private String jwtSecret;
+        
+        private String jwtCookie;
         private String sessionCookie;
+
         private boolean csrfRequired; 
-
         private List<String> publicPaths;
-
         private RateLimitConfig rateLimit;
     }
 
