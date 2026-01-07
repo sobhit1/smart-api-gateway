@@ -31,7 +31,6 @@ public class AppConfig {
     public static class ProjectConfig {
         @NotNull
         private String prefix;
-        private String subdomain;
         
         @NotNull
         private String targetUrl;
