@@ -39,6 +39,7 @@ public class AppConfig {
         @NotNull
         private AuthType authType;
         private String jwtSecret;
+        private String jwtPublicKey;
         
         private String jwtCookie;
         private String sessionCookie;

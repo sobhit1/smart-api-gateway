@@ -34,7 +34,8 @@ projects:
     timeout: 2s
     
     auth-type: JWT
-    jwt-secret: ${SHOP_JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
+    jwt-public-key: ${SHOP_JWT_PUBLIC_KEY}
+    jwt-secret: ${SHOP_JWT_SECRET}
     
     public-paths:
       - /shop/auth/login

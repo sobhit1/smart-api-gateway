@@ -6,8 +6,10 @@ import io.netty.channel.ChannelOption;
 import reactor.netty.http.client.HttpClient;
 import java.time.Duration;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
@@ -37,7 +39,7 @@ public class ProxyService {
                 .build();
     }
 
-     /**
+    /**
      * Forwards the incoming request to the downstream backend service.
      *
      * @param exchange Current HTTP exchange (request + response)
@@ -83,19 +85,19 @@ public class ProxyService {
                 .body(BodyInserters.fromDataBuffers(request.getBody()))
                 .exchangeToMono(backendResponse -> {
                     response.setStatusCode(backendResponse.statusCode());
-                    
+
                     backendResponse.headers().asHttpHeaders().forEach((k, v) -> {
                         response.getHeaders().addAll(k, v);
                     });
 
-                    return response.writeWith(backendResponse.bodyToFlux(org.springframework.core.io.buffer.DataBuffer.class));
+                    return response.writeWith(backendResponse.bodyToFlux(DataBuffer.class));
                 })
                 .onErrorResume(e -> {
                     log.error("Proxy Error for {}: {}", finalTargetUrl, e.getMessage());
                     if (e instanceof WebClientResponseException wcre) {
                         response.setStatusCode(wcre.getStatusCode());
                     } else {
-                        response.setStatusCode(org.springframework.http.HttpStatus.BAD_GATEWAY);
+                        response.setStatusCode(HttpStatus.BAD_GATEWAY);
                     }
                     return response.setComplete();
                 });

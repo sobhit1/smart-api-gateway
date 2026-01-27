@@ -5,6 +5,7 @@ import module java.base;
 import com.myinfra.gateway.smartapigateway.config.AppConfig.ProjectConfig;
 import com.myinfra.gateway.smartapigateway.model.Identity;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtParserBuilder;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import lombok.RequiredArgsConstructor;
@@ -32,9 +33,7 @@ public class AuthService {
      * @return Mono<Identity> if authentication succeeds, or Mono.empty() if it fails
      */
     public Mono<Identity> authenticate(ServerHttpRequest request, ProjectConfig config) {
-        if (config.getAuthType() == null) {
-            return Mono.empty();
-        }
+        if (config.getAuthType() == null) return Mono.empty();
 
         return switch (config.getAuthType()) {
             case JWT -> authenticateJwt(request, config);
@@ -54,17 +53,26 @@ public class AuthService {
     private Mono<Identity> authenticateJwt(ServerHttpRequest request, ProjectConfig config) {
         String token = extractToken(request, config);
 
-        if (token == null) {
-            return Mono.empty();
-        }
+        if (token == null) return Mono.empty();
 
         try {
-            byte[] keyBytes = Base64.getDecoder().decode(config.getJwtSecret());
-            SecretKey key = Keys.hmacShaKeyFor(keyBytes);
+            JwtParserBuilder parserBuilder = Jwts.parser();
 
-            Claims claims = Jwts.parser()
-                    .verifyWith(key)
-                    .build()
+            if (config.getJwtPublicKey() != null && !config.getJwtPublicKey().isBlank()) {
+                // Asymmetric (RS256)
+                PublicKey publicKey = parsePublicKey(config.getJwtPublicKey());
+                parserBuilder.verifyWith(publicKey);
+            } else if (config.getJwtSecret() != null) {
+                // Symmetric (HS256)
+                byte[] keyBytes = Base64.getDecoder().decode(config.getJwtSecret());
+                SecretKey key = Keys.hmacShaKeyFor(keyBytes);
+                parserBuilder.verifyWith(key);
+            } else {
+                log.error("No JWT key configured for project {}", config.getPrefix());
+                return Mono.empty();
+            }
+
+            Claims claims = parserBuilder.build()
                     .parseSignedClaims(token)
                     .getPayload();
 
@@ -104,6 +112,20 @@ public class AuthService {
         }
 
         return null;
+    }
+
+    /**
+     * Parses a Base64-encoded public key string into a PublicKey object.
+     *
+     * @param base64PublicKey Base64-encoded public key
+     * @return PublicKey instance
+     * @throws Exception if parsing fails
+     */
+    private PublicKey parsePublicKey(String base64PublicKey) throws Exception {
+        byte[] keyBytes = Base64.getDecoder().decode(base64PublicKey);
+        X509EncodedKeySpec spec = new X509EncodedKeySpec(keyBytes);
+        KeyFactory kf = KeyFactory.getInstance("RSA");
+        return kf.generatePublic(spec);
     }
 
     /**
