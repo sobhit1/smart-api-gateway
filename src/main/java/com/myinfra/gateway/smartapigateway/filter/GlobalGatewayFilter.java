@@ -6,6 +6,7 @@ import com.myinfra.gateway.smartapigateway.config.AppConfig.ProjectConfig;
 import com.myinfra.gateway.smartapigateway.model.Identity;
 import com.myinfra.gateway.smartapigateway.service.AuthService;
 import com.myinfra.gateway.smartapigateway.service.ProjectResolver;
+import com.myinfra.gateway.smartapigateway.service.ProxyService;
 import com.myinfra.gateway.smartapigateway.service.RateLimiter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,6 +35,7 @@ public class GlobalGatewayFilter implements GlobalFilter, Ordered {
     private final ProjectResolver projectResolver;
     private final AuthService authService;
     private final RateLimiter rateLimiter;
+    private final ProxyService proxyService;
     private final AntPathMatcher pathMatcher = new AntPathMatcher();
 
     /**
@@ -52,7 +54,7 @@ public class GlobalGatewayFilter implements GlobalFilter, Ordered {
         String host = request.getHeaders().getFirst("Host");
 
         Optional<ProjectConfig> configOpt = projectResolver.resolve(path, host);
-        
+
         if (configOpt.isEmpty()) {
             log.warn("404 - No project matched for host: {} path: {}", host, path);
             response.setStatusCode(HttpStatus.NOT_FOUND);
@@ -79,12 +81,7 @@ public class GlobalGatewayFilter implements GlobalFilter, Ordered {
                             return response.setComplete();
                         }
 
-                        ServerHttpRequest mutatedRequest = request.mutate()
-                            .header("X-User-Id", identity.id())
-                            .header("X-User-Role", identity.role())
-                            .build();
-                            
-                        return chain.filter(exchange.mutate().request(mutatedRequest).build());
+                        return proxyService.forward(exchange, config, identity);
                     });
             })
             .switchIfEmpty(Mono.defer(() -> {
