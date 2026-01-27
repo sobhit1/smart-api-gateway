@@ -1,7 +1,5 @@
 package com.myinfra.gateway.smartapigateway.service;
 
-import module java.base;
-
 import com.myinfra.gateway.smartapigateway.config.AppConfig.ProjectConfig;
 import com.myinfra.gateway.smartapigateway.model.Identity;
 import io.jsonwebtoken.Claims;
@@ -17,6 +15,12 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
 import javax.crypto.SecretKey;
+
+import java.security.PublicKey;
+import java.util.Base64;
+
+import java.security.KeyFactory;
+import java.security.spec.X509EncodedKeySpec;
 
 @Slf4j
 @Service
@@ -104,8 +108,9 @@ public class AuthService {
             return authHeader.substring(7);
         }
 
-        if (config.getJwtCookie() != null) {
-            HttpCookie cookie = request.getCookies().getFirst(config.getJwtCookie());
+        String jwtCookie = config.getJwtCookie();
+        if (jwtCookie != null && !jwtCookie.isBlank()) {
+            HttpCookie cookie = request.getCookies().getFirst(jwtCookie);
             if (cookie != null) {
                 return cookie.getValue();
             }

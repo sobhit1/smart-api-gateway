@@ -23,6 +23,13 @@ spring:
           max-idle: 10
           min-idle: 2
           max-wait: 500ms
+  cloud:
+    gateway:
+      routes:
+        - id: catch-all
+          uri: no://op  # Dummy URI, GlobalFilter will override this
+          predicates:
+            - Path=/**
 
 gateway-config:
   global-timeout: 3s
@@ -30,7 +37,7 @@ gateway-config:
 projects:
   shop:
     prefix: /shop
-    target-url: http://localhost:8081
+    target-url: https://smart-city-tracker-backend.onrender.com
     timeout: 2s
     
     auth-type: JWT
@@ -41,6 +48,7 @@ projects:
       - /shop/auth/login
       - /shop/auth/register
       - /shop/public/**
+      - /shop/actuator/**
 
     rate-limit:
       capacity: 10

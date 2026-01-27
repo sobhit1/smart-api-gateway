@@ -1,7 +1,5 @@
 package com.myinfra.gateway.smartapigateway.service;
 
-import module java.base;
-
 import com.myinfra.gateway.smartapigateway.config.AppConfig.ProjectConfig;
 import com.myinfra.gateway.smartapigateway.config.AppConfig.RateLimitConfig;
 import com.myinfra.gateway.smartapigateway.model.Identity;
@@ -14,6 +12,9 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
+
+import java.util.List;
+import java.util.Objects;
 
 @Slf4j
 @Service
@@ -63,7 +64,7 @@ public class RateLimiter {
                 "1" 
         );
 
-        return redisTemplate.execute(script, keys, args)
+        return redisTemplate.execute(Objects.requireNonNull(script), Objects.requireNonNull(keys), Objects.requireNonNull(args))
                 .next()
                 .map(result -> {
                     Long allowed = result.getFirst();

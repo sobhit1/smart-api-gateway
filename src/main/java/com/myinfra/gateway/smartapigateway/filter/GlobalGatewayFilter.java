@@ -1,7 +1,5 @@
 package com.myinfra.gateway.smartapigateway.filter;
 
-import module java.base;
-
 import com.myinfra.gateway.smartapigateway.config.AppConfig.ProjectConfig;
 import com.myinfra.gateway.smartapigateway.model.Identity;
 import com.myinfra.gateway.smartapigateway.service.AuthService;
@@ -22,6 +20,8 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import java.net.InetSocketAddress;
+
+import java.util.Optional;
 
 /**
  * Global API Gateway filter that enforces routing, authentication,
@@ -98,10 +98,18 @@ public class GlobalGatewayFilter implements GlobalFilter, Ordered {
      * @return true if the path matches any configured public pattern
      */
     private boolean isPublicPath(String path, ProjectConfig config) {
-        if (config.getPublicPaths() == null) return false;
-        
+        if (config == null || config.getPublicPaths() == null) return false;
+
+        if (path == null) path = "";
+
         for (String pattern : config.getPublicPaths()) {
-            if (pathMatcher.match(pattern, path)) return true;
+            if (pattern == null || pattern.isBlank()) continue;
+
+            try {
+                if (pathMatcher.match(pattern, path)) return true;
+            } catch (IllegalArgumentException e) {
+                log.warn("Invalid public-path pattern '{}', skipping. path='{}' err={}", pattern, path, e.getMessage());
+            }
         }
         return false;
     }
