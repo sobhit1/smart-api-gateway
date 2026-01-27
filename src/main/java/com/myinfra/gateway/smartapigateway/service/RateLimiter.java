@@ -23,6 +23,9 @@ public class RateLimiter {
     private final ReactiveStringRedisTemplate redisTemplate;
     private RedisScript<List<Long>> script;
 
+    /**
+     * Loads the Lua rate-limiting script from the classpath at application startup.
+     */
     @PostConstruct
     @SuppressWarnings("unchecked")
     public void loadScript() {
@@ -36,7 +39,7 @@ public class RateLimiter {
 
     /**
      * Checks if the request is allowed based on the Token Bucket algorithm.
-     * Supports fallback to IP-based rate limiting for unauthenticated users.
+     * Supports fallback to IP-based rate limiting for unauthenticated/anonymous users.
      *
      * @param config    The project configuration
      * @param identity  The authenticated user identity (nullable)
@@ -71,15 +74,25 @@ public class RateLimiter {
     }
 
     /**
-     * Generates the Redis key for rate limiting.
-     * Logic: Use User ID if present; otherwise fallback to IP address.
+     * Generates the Redis key used for rate limiting.
+     *
+     * Logic:
+     * - If the user is authenticated (non-anonymous), use their user ID.
+     * - Otherwise, fallback to IP-based rate limiting.
+     *
+     * @param prefix   Project prefix (e.g., /shop)
+     * @param identity Authenticated user identity
+     * @param ipAddress Client IP address
+     * @return Redis key for the token bucket
      */
     private String generateKey(String prefix, Identity identity, String ipAddress) {
-        if (identity != null && identity.id() != null) {
+        if (identity != null 
+                && identity.id() != null 
+                && !"anonymous".equals(identity.id())) {
             // Authenticated User: rate_limit:/shop:user:u_123
             return "rate_limit:" + prefix + ":user:" + identity.id();
         } else {
-            // Unauthenticated (Public) User: rate_limit:/shop:ip:192.168.1.1
+            // Unauthenticated (Public) User or Anonymous Identity: rate_limit:/shop:ip:192.168.1.1
             return "rate_limit:" + prefix + ":ip:" + ipAddress;
         }
     }

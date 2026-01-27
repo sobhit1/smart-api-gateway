@@ -1,0 +1,138 @@
+package com.myinfra.gateway.smartapigateway.filter;
+
+import module java.base;
+
+import com.myinfra.gateway.smartapigateway.config.AppConfig.ProjectConfig;
+import com.myinfra.gateway.smartapigateway.model.Identity;
+import com.myinfra.gateway.smartapigateway.service.AuthService;
+import com.myinfra.gateway.smartapigateway.service.ProjectResolver;
+import com.myinfra.gateway.smartapigateway.service.RateLimiter;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.cloud.gateway.filter.GatewayFilterChain;
+import org.springframework.cloud.gateway.filter.GlobalFilter;
+import org.springframework.core.Ordered;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.server.reactive.ServerHttpRequest;
+import org.springframework.http.server.reactive.ServerHttpResponse;
+import org.springframework.stereotype.Component;
+import org.springframework.util.AntPathMatcher;
+import org.springframework.web.server.ServerWebExchange;
+import reactor.core.publisher.Mono;
+
+import java.net.InetSocketAddress;
+
+/**
+ * Global API Gateway filter that enforces routing, authentication,
+ * rate limiting, and identity propagation for all incoming requests.
+ */
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class GlobalGatewayFilter implements GlobalFilter, Ordered {
+
+    private final ProjectResolver projectResolver;
+    private final AuthService authService;
+    private final RateLimiter rateLimiter;
+    private final AntPathMatcher pathMatcher = new AntPathMatcher();
+
+    /**
+     * Main gateway filter method executed for every HTTP request.
+     *
+     * @param exchange The current server exchange (request + response context)
+     * @param chain    The gateway filter chain
+     * @return Mono<Void> indicating request completion
+     */
+    @Override
+    public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+        ServerHttpRequest request = exchange.getRequest();
+        ServerHttpResponse response = exchange.getResponse();
+        
+        String path = request.getURI().getPath();
+        String host = request.getHeaders().getFirst("Host");
+
+        Optional<ProjectConfig> configOpt = projectResolver.resolve(path, host);
+        
+        if (configOpt.isEmpty()) {
+            log.warn("404 - No project matched for host: {} path: {}", host, path);
+            response.setStatusCode(HttpStatus.NOT_FOUND);
+            return response.setComplete();
+        }
+        ProjectConfig config = configOpt.get();
+
+        boolean isPublic = isPublicPath(path, config);
+
+        Mono<Identity> identityMono;
+        if (isPublic) {
+            identityMono = Mono.just(new Identity("anonymous", "ROLE_ANONYMOUS", "FREE"));
+        } else {
+            identityMono = authService.authenticate(request, config);
+        }
+
+        return identityMono
+            .flatMap(identity -> {
+                String ipAddress = getClientIp(request);
+                return rateLimiter.isAllowed(config, identity, ipAddress)
+                    .flatMap(allowed -> {
+                        if (!allowed) {
+                            response.setStatusCode(HttpStatus.TOO_MANY_REQUESTS);
+                            return response.setComplete();
+                        }
+
+                        ServerHttpRequest mutatedRequest = request.mutate()
+                            .header("X-User-Id", identity.id())
+                            .header("X-User-Role", identity.role())
+                            .build();
+                            
+                        return chain.filter(exchange.mutate().request(mutatedRequest).build());
+                    });
+            })
+            .switchIfEmpty(Mono.defer(() -> {
+                response.setStatusCode(HttpStatus.UNAUTHORIZED);
+                return response.setComplete();
+            }));
+    }
+
+    /**
+     * Checks whether the requested path is publicly accessible.
+     *
+     * @param path   The request URI path
+     * @param config The project configuration
+     * @return true if the path matches any configured public pattern
+     */
+    private boolean isPublicPath(String path, ProjectConfig config) {
+        if (config.getPublicPaths() == null) return false;
+        
+        for (String pattern : config.getPublicPaths()) {
+            if (pathMatcher.match(pattern, path)) return true;
+        }
+        return false;
+    }
+
+     /**
+     * Resolves the client's IP address for rate limiting and abuse detection.
+     * Prefers X-Forwarded-For header (for proxy environments).
+     *
+     * @param request The incoming HTTP request
+     * @return Client IP address or "unknown" if not resolvable
+     */
+    private String getClientIp(ServerHttpRequest request) {
+        String xForwardedFor = request.getHeaders().getFirst("X-Forwarded-For");
+        if (xForwardedFor != null && !xForwardedFor.isBlank()) {
+            return xForwardedFor.split(",")[0].trim();
+        }
+        
+        InetSocketAddress remoteAddress = request.getRemoteAddress();
+        return (remoteAddress != null) ? remoteAddress.getAddress().getHostAddress() : "unknown";
+    }
+
+    /**
+     * Ensures this filter runs before most other gateway filters.
+     *
+     * @return filter order priority
+     */
+    @Override
+    public int getOrder() {
+        return -1;
+    }
+}

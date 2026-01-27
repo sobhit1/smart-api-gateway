@@ -24,6 +24,13 @@ public class AuthService {
 
     private final ReactiveStringRedisTemplate redisTemplate;
 
+     /**
+     * Authenticates an incoming request based on project configuration.
+     *
+     * @param request The incoming HTTP request
+     * @param config  The matched project configuration
+     * @return Mono<Identity> if authentication succeeds, or Mono.empty() if it fails
+     */
     public Mono<Identity> authenticate(ServerHttpRequest request, ProjectConfig config) {
         if (config.getAuthType() == null) {
             return Mono.empty();
@@ -35,6 +42,15 @@ public class AuthService {
         };
     }
 
+    /**
+     * Performs JWT-based authentication.
+     * Extracts the token from header or cookie, validates its signature,
+     * and converts claims into an {@link Identity}.
+     *
+     * @param request Incoming HTTP request
+     * @param config  Project configuration containing JWT settings
+     * @return Mono<Identity> if token is valid, otherwise Mono.empty()
+     */
     private Mono<Identity> authenticateJwt(ServerHttpRequest request, ProjectConfig config) {
         String token = extractToken(request, config);
 
@@ -65,6 +81,15 @@ public class AuthService {
         }
     }
 
+    /**
+     * Extracts JWT token from either:
+     * - Authorization header (Bearer token)
+     * - Configured cookie (if defined)
+     *
+     * @param request Incoming HTTP request
+     * @param config  Project configuration
+     * @return JWT token string or null if not found
+     */
     private String extractToken(ServerHttpRequest request, ProjectConfig config) {
         String authHeader = request.getHeaders().getFirst("Authorization");
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
@@ -81,6 +106,14 @@ public class AuthService {
         return null;
     }
 
+    /**
+     * Performs session-based authentication using Redis.
+     * Looks up the session ID from cookies and verifies its existence in Redis.
+     *
+     * @param request Incoming HTTP request
+     * @param config  Project configuration containing session settings
+     * @return Mono<Identity> if session exists, otherwise Mono.empty()
+     */
     private Mono<Identity> authenticateSession(ServerHttpRequest request, ProjectConfig config) {
         String cookieName = config.getSessionCookie();
         if (cookieName == null) {
