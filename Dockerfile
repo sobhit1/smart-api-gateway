@@ -1,5 +1,5 @@
 # --- Build the Application ---
-FROM eclipse-temurin:25-jdk AS build
+FROM eclipse-temurin:21-jdk AS build
 WORKDIR /app
 
 # Copy project files
@@ -20,7 +20,7 @@ COPY src ./src
 RUN ./mvnw clean package -DskipTests=true
 
 # --- Run the Application ---
-FROM eclipse-temurin:25-jre-alpine
+FROM eclipse-temurin:21-jre-alpine
 
 WORKDIR /app
 

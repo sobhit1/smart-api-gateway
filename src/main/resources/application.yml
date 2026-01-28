@@ -31,40 +31,85 @@ spring:
           predicates:
             - Path=/**
 
-gateway-config:
-  global-timeout: 3s
 
-projects:
-  smartcity:
-    prefix: /smartcity
-    target-url: https://smart-city-tracker-backend.onrender.com
-    timeout: 2s
-    
-    auth-type: JWT
-    jwt-public-key: ${SMART_CITY_JWT_PUBLIC_KEY}
-    jwt-secret: ${SMART_CITY_JWT_SECRET}
+app:
+  gateway-config:
+    global-timeout: 3s
 
-    public-paths:
-      - /smartcity/api/auth/**
-      - /smartcity/public/**
-      - /smartcity/actuator/**
+  projects:
+    smartcity:
+      prefix: /smartcity
+      target-url: https://smart-city-tracker-backend.onrender.com
 
-    rate-limit:
-      capacity: 10
-      refill-rate: 5
-      
-  cms:
-    prefix: /cms
-    target-url: http://localhost:8082
-    timeout: 5s
-    
-    auth-type: SESSION
-    session-cookie: SESSION_ID
-    csrf-required: true
-    
-    public-paths:
-      - /cms/auth/login
-      
-    rate-limit:
-      capacity: 5
-      refill-rate: 2
+      auth-type: JWT
+      jwt-public-key: ${SMART_CITY_JWT_PUBLIC_KEY}
+
+      public-paths:
+        - /smartcity/api/auth/**
+        - /smartcity/public/**
+        - /smartcity/actuator/**
+
+      rate-limit:
+        capacity: 10
+        refill-rate: 5
+
+      circuit-breaker:
+        failure-rate-threshold: 50
+        wait-duration: 10s
+        sliding-window-size: 10
+        permitted-number-of-calls-in-half-open-state: 3
+
+      time-limiter:
+        timeout: 5s
+        cancel-running-future: true
+
+    shop:
+      prefix: /shop
+      target-url: http://localhost:8081
+
+      auth-type: JWT
+      jwt-secret: ${SHOP_JWT_SECRET}
+
+      public-paths:
+        - /shop/auth/**
+        - /shop/public/**
+        - /shop/actuator/**
+
+      rate-limit:
+        capacity: 15
+        refill-rate: 8
+
+      circuit-breaker:
+        failure-rate-threshold: 50
+        wait-duration: 10s
+        sliding-window-size: 10
+        permitted-number-of-calls-in-half-open-state: 3
+
+      time-limiter:
+        timeout: 3s
+        cancel-running-future: true
+
+    cms:
+      prefix: /cms
+      target-url: http://localhost:8082
+
+      auth-type: SESSION
+      session-cookie: SESSION_ID
+      csrf-required: true
+
+      public-paths:
+        - /cms/auth/login
+
+      rate-limit:
+        capacity: 5
+        refill-rate: 2
+
+      circuit-breaker:
+        failure-rate-threshold: 50
+        wait-duration: 10s
+        sliding-window-size: 10
+        permitted-number-of-calls-in-half-open-state: 3
+
+      time-limiter:
+        timeout: 3s
+        cancel-running-future: true
