@@ -22,14 +22,19 @@ public class ProjectResolver {
      * @param hostname The Host header value (e.g., "api.myinfra.com")
      * @return Optional containing the matching ProjectConfig, or empty if no match found.
      */
-    public Optional<ProjectConfig> resolve(String path, String hostname) {
+    public Optional<ProjectConfig> resolve(String path) {
         if (appConfig.getProjects() == null || appConfig.getProjects().isEmpty()) {
             log.warn("No projects configured in application.yml");
             return Optional.empty();
         }
 
         return appConfig.getProjects().values().stream()
-                .filter(config -> path.startsWith(config.getPrefix()))
+                .filter(config -> config.getPrefix() != null)
+                .sorted((c1, c2) -> Integer.compare(c2.getPrefix().length(), c1.getPrefix().length()))
+                .filter(config -> {
+                    String p = config.getPrefix();
+                    return path.equals(p) || path.startsWith(p + "/");
+                })
                 .findFirst();
     }
 }

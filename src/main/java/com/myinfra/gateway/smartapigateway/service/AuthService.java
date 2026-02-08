@@ -127,7 +127,12 @@ public class AuthService {
      * @throws Exception if parsing fails
      */
     private PublicKey parsePublicKey(String base64PublicKey) throws Exception {
-        byte[] keyBytes = Base64.getDecoder().decode(base64PublicKey);
+        String sanitizedKey = base64PublicKey
+                .replace("-----BEGIN PUBLIC KEY-----", "")
+                .replace("-----END PUBLIC KEY-----", "")
+                .replaceAll("\\s+", "");
+
+        byte[] keyBytes = Base64.getDecoder().decode(sanitizedKey);
         X509EncodedKeySpec spec = new X509EncodedKeySpec(keyBytes);
         KeyFactory kf = KeyFactory.getInstance("RSA");
         return kf.generatePublic(spec);

@@ -4,6 +4,21 @@ server:
     connection-timeout: 2s
   shutdown: graceful
 
+# Monitoring & Metrics (Actuator)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, circuitbreakers, ratelimiters
+  endpoint:
+    health:
+      show-details: always
+  health:
+    circuitbreakers:
+      enabled: true
+    ratelimiters:
+      enabled: true
+
 spring:
   application:
     name: smart-api-gateway
@@ -23,15 +38,16 @@ spring:
           max-idle: 10
           min-idle: 2
           max-wait: 500ms
+  
   cloud:
     gateway:
       routes:
         - id: catch-all
-          uri: no://op  # Dummy URI, GlobalFilter will override this
+          uri: no://op  # Dummy URI, GlobalFilter overrides this dynamically
           predicates:
             - Path=/**
 
-
+# Custom Application Config
 app:
   gateway-config:
     global-timeout: 3s

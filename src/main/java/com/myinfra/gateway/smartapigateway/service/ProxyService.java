@@ -49,7 +49,7 @@ public class ProxyService {
         HttpClient httpClient = Objects.requireNonNull(
                 HttpClient.create()
                         .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 3000)
-                        .responseTimeout(Duration.ofSeconds(5)),
+                        .responseTimeout(Duration.ofSeconds(60)),
                 "HttpClient must not be null"
         );
 

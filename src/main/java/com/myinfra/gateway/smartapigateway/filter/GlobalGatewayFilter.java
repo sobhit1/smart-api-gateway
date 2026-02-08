@@ -8,6 +8,7 @@ import com.myinfra.gateway.smartapigateway.service.ProxyService;
 import com.myinfra.gateway.smartapigateway.service.RateLimiter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpMethod;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
@@ -20,7 +21,6 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import java.net.InetSocketAddress;
-
 import java.util.Optional;
 
 /**
@@ -53,7 +53,7 @@ public class GlobalGatewayFilter implements GlobalFilter, Ordered {
         String path = request.getURI().getPath();
         String host = request.getHeaders().getFirst("Host");
 
-        Optional<ProjectConfig> configOpt = projectResolver.resolve(path, host);
+        Optional<ProjectConfig> configOpt = projectResolver.resolve(path);
 
         if (configOpt.isEmpty()) {
             log.warn("404 - No project matched for host: {} path: {}", host, path);
@@ -62,16 +62,22 @@ public class GlobalGatewayFilter implements GlobalFilter, Ordered {
         }
         ProjectConfig config = configOpt.get();
 
-        boolean isPublic = isPublicPath(path, config);
-
-        Mono<Identity> identityMono;
-        if (isPublic) {
-            identityMono = Mono.just(new Identity("anonymous", "ROLE_ANONYMOUS", "FREE"));
-        } else {
-            identityMono = authService.authenticate(request, config);
+        if (Boolean.TRUE.equals(config.isCsrfRequired()) && isWriteRequest(request)) {
+            String csrfToken = request.getHeaders().getFirst("X-XSRF-TOKEN");
+            if (csrfToken == null || csrfToken.isBlank()) {
+                log.warn("CSRF attempt blocked for path: {}", path);
+                response.setStatusCode(HttpStatus.FORBIDDEN);
+                return response.setComplete();
+            }
         }
 
-        return identityMono
+        return authService.authenticate(request, config)
+            .switchIfEmpty(Mono.defer(() -> {
+                if (isPublicPath(path, config)) {
+                    return Mono.just(new Identity("anonymous", "ROLE_ANONYMOUS", "FREE"));
+                }
+                return Mono.empty();
+            }))
             .flatMap(identity -> {
                 String ipAddress = getClientIp(request);
                 return rateLimiter.isAllowed(config, identity, ipAddress)
@@ -88,6 +94,20 @@ public class GlobalGatewayFilter implements GlobalFilter, Ordered {
                 response.setStatusCode(HttpStatus.UNAUTHORIZED);
                 return response.setComplete();
             }));
+    }
+
+    /**
+     * Checks whether the request is a write request.
+     *
+     * @param request The incoming HTTP request
+     * @return true if the request is a write request
+     */
+    private boolean isWriteRequest(ServerHttpRequest request) {
+        HttpMethod method = request.getMethod();
+        return method == HttpMethod.POST || 
+               method == HttpMethod.PUT || 
+               method == HttpMethod.DELETE || 
+               method == HttpMethod.PATCH;
     }
 
     /**

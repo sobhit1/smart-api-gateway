@@ -4,14 +4,15 @@
 --
 -- ARGV[1] : Capacity (Maximum tokens allowed in the bucket)
 -- ARGV[2] : Refill Rate (Tokens added per second)
--- ARGV[3] : Current Timestamp (in Epoch milliseconds)
 -- ARGV[4] : Requested Tokens (usually 1)
 
 local key = KEYS[1]
 local capacity = tonumber(ARGV[1])
 local refill_rate = tonumber(ARGV[2])
-local now = tonumber(ARGV[3])
 local requested = tonumber(ARGV[4])
+
+local redis_time = redis.call("TIME") 
+local now = tonumber(redis_time[1]) * 1000 + math.floor(tonumber(redis_time[2]) / 1000)
 
 -- Fetch current state
 local state = redis.call("HMGET", key, "tokens", "last_refilled")
@@ -25,11 +26,10 @@ if tokens_left == nil then
 end
 
 -- Refill Logic
--- Calculate time passed in ms
 local delta = math.max(0, now - last_refilled)
 local tokens_to_add = (delta / 1000) * refill_rate
 
--- Only update state if we actually added tokens to avoid drift
+-- Only update state if we actually added tokens (or if enough time passed)
 if tokens_to_add > 0 then
   tokens_left = math.min(capacity, tokens_left + tokens_to_add)
   last_refilled = now

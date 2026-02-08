@@ -67,8 +67,16 @@ public class RateLimiter {
         return redisTemplate.execute(Objects.requireNonNull(script), Objects.requireNonNull(keys), Objects.requireNonNull(args))
                 .next()
                 .map(result -> {
-                    Long allowed = result.getFirst();
-                    return allowed == 1L;
+                    if (result == null || result.isEmpty()) {
+                        return false;
+                    }
+
+                    Object allowedObj = result.get(0);
+                    if (allowedObj instanceof Number n) {
+                        return n.longValue() == 1L;
+                    }
+
+                    return "1".equals(allowedObj.toString());
                 })
                 .doOnError(e -> log.error("Rate Limiter Redis Error: {}", e.getMessage()))
                 .onErrorReturn(true);
