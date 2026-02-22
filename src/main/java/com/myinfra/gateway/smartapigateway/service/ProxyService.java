@@ -1,7 +1,5 @@
 package com.myinfra.gateway.smartapigateway.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.myinfra.gateway.smartapigateway.config.AppConfig.ProjectConfig;
 import com.myinfra.gateway.smartapigateway.model.Identity;
 import io.netty.channel.ChannelOption;
@@ -13,13 +11,13 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.client.reactive.ClientHttpConnector;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -28,7 +26,6 @@ import reactor.netty.http.client.HttpClient;
 import java.net.URI;
 import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.TimeoutException;
 
 @Slf4j
 @Service
@@ -37,14 +34,10 @@ public class ProxyService {
     private final WebClient webClient;
     private final ReactiveCircuitBreakerFactory<?, ?> circuitBreakerFactory;
 
-    private final ObjectMapper objectMapper;
-
     public ProxyService(WebClient.Builder webClientBuilder,
-                        ReactiveCircuitBreakerFactory<?, ?> circuitBreakerFactory,
-                        ObjectMapper objectMapper) {
+                        ReactiveCircuitBreakerFactory<?, ?> circuitBreakerFactory) {
         Objects.requireNonNull(webClientBuilder, "WebClient.Builder must not be null");
         this.circuitBreakerFactory = Objects.requireNonNull(circuitBreakerFactory, "CircuitBreakerFactory must not be null");
-        this.objectMapper = Objects.requireNonNull(objectMapper, "ObjectMapper must not be null");
 
         HttpClient httpClient = Objects.requireNonNull(
                 HttpClient.create()
@@ -84,9 +77,12 @@ public class ProxyService {
         
         if (prefix == null || prefix.isBlank()
             || targetUrl == null || targetUrl.isBlank()) {
-            log.error("Invalid configuration for project");
-            response.setStatusCode(HttpStatus.INTERNAL_SERVER_ERROR);
-            return response.setComplete();
+            return Mono.error(
+                    new ResponseStatusException(
+                            HttpStatus.INTERNAL_SERVER_ERROR,
+                            "Invalid configuration for project"
+                    )
+            );
         }
 
         String path = request.getURI().getPath();
@@ -102,24 +98,24 @@ public class ProxyService {
         try {
             uri = URI.create(sb.toString());
         } catch (IllegalArgumentException e) {
-            log.error("Invalid target URI: {}", e.getMessage());
-            response.setStatusCode(HttpStatus.INTERNAL_SERVER_ERROR);
-            return response.setComplete();
+            return Mono.error(
+                    new ResponseStatusException(
+                            HttpStatus.INTERNAL_SERVER_ERROR,
+                            "Invalid target URI: " + e.getMessage()
+                    )
+            );
         }
         final URI targetUri = Objects.requireNonNull(uri);
 
         log.debug("Proxying: {} -> {}", path, targetUri);
 
         HttpHeaders filteredHeaders = new HttpHeaders();
-        HttpHeaders incoming = request.getHeaders();
-        
-        incoming.forEach((key, values) -> {
+        request.getHeaders().forEach((key, values) -> {
             if (key == null || values == null) return;
             if (!isIgnoredHeader(key)) {
                 filteredHeaders.addAll(key, values);
             }
         });
-
 
         if (identity.id() != null) filteredHeaders.set("X-User-Id", identity.id());
         if (identity.role() != null) filteredHeaders.set("X-User-Role", identity.role());
@@ -135,15 +131,24 @@ public class ProxyService {
                 .headers(h -> h.addAll(filteredHeaders))
                 .body(BodyInserters.fromDataBuffers(bodyFlux))
                 .exchangeToMono(backendResponse -> {
+                    if (backendResponse.statusCode().is5xxServerError()) {
+                        return Mono.error(
+                                new ResponseStatusException(
+                                        backendResponse.statusCode(),
+                                        "Downstream service error"
+                                )
+                        );
+                    }
+
                     response.setStatusCode(backendResponse.statusCode());
 
-                    HttpHeaders backendHeaders = backendResponse.headers().asHttpHeaders();
-                    backendHeaders.forEach((key, values) -> {
-                        if (key == null || values == null) return;
-                        if (!isIgnoredHeader(key)) {
-                            response.getHeaders().addAll(key, values);
-                        }
-                    });
+                    backendResponse.headers().asHttpHeaders()
+                            .forEach((key, values) -> {
+                                if (key == null || values == null) return;
+                                if (!isIgnoredHeader(key)) {
+                                    response.getHeaders().addAll(key, values);
+                                }
+                            });
 
                     return response.writeWith(backendResponse.bodyToFlux(DataBuffer.class));
                 });
@@ -154,67 +159,7 @@ public class ProxyService {
 
         ReactiveCircuitBreaker circuitBreaker = circuitBreakerFactory.create(prefix);
 
-        return circuitBreaker.run(backendCall, throwable -> resumeWithFallback(response, throwable));
-    }
-
-    /**
-     * Fallback method invoked when Circuit Breaker is open or backend call fails.
-     *
-     * @param response ServerHttpResponse to write the fallback response
-     * @param t        The throwable that caused the fallback
-     * @return Mono<Void> completing when the fallback response is written
-     */
-    private Mono<Void> resumeWithFallback(ServerHttpResponse response, Throwable t) {
-        log.error("Circuit Breaker Fallback triggered: {}", t.getMessage());
-
-        if (response.isCommitted()) {
-            return Mono.error(t);
-        }
-
-        response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
-
-        HttpStatus status = HttpStatus.SERVICE_UNAVAILABLE;
-        String error = "Service Unavailable";
-        String message = "The backend service is currently unavailable.";
-
-        Throwable cause = t;
-        while (cause.getCause() != null) {
-            cause = cause.getCause();
-        }
-
-        if (cause instanceof TimeoutException) {
-            status = HttpStatus.GATEWAY_TIMEOUT;
-            error = "Gateway Timeout";
-            message = "The request timed out waiting for the backend.";
-        } 
-        else if (cause instanceof java.net.ConnectException) {
-            status = HttpStatus.BAD_GATEWAY;
-            error = "Bad Gateway";
-            message = "Could not connect to the backend service.";
-        } 
-        else if (cause.getClass().getName().contains("CallNotPermittedException")) {
-            status = HttpStatus.SERVICE_UNAVAILABLE;
-            error = "Circuit Breaker Open";
-            message = "Circuit breaker is OPEN. Request failed fast.";
-        }
-
-        response.setStatusCode(status);
-
-        Map<String, Object> errorDetails = new HashMap<>();
-        errorDetails.put("status", status.value());
-        errorDetails.put("error", error);
-        errorDetails.put("message", message);
-
-        byte[] bytes;
-        try {
-            bytes = objectMapper.writeValueAsBytes(errorDetails);
-        } catch (JsonProcessingException e) {
-            bytes = "{\"error\": \"Service Unavailable\"}".getBytes();
-        }
-
-        DataBuffer buffer = response.bufferFactory().wrap(Objects.requireNonNull(bytes));
-
-        return response.writeWith(Objects.requireNonNull(Mono.just(buffer)));
+        return circuitBreaker.run(backendCall);
     }
 
     /**
@@ -225,10 +170,11 @@ public class ProxyService {
      * @return Path without the project prefix (e.g., "/orders")
      */
     private String stripPrefix(String path, String prefix) {
-        if (path == null) return "";
+        if (path == null) return "/";
         if (prefix == null || prefix.isEmpty()) return path;
         if (path.startsWith(prefix)) {
-            return path.substring(prefix.length());
+            String stripped = path.substring(prefix.length());
+            return stripped.isEmpty() ? "/" : stripped;
         }
         return path;
     }

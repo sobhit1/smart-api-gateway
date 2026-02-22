@@ -18,6 +18,8 @@ import java.util.Map;
 public class AppConfig {
 
     private GatewayConfig gatewayConfig;
+
+    @NotNull
     private Map<String, ProjectConfig> projects;
 
     @Data
@@ -33,7 +35,6 @@ public class AppConfig {
         @NotBlank
         private String targetUrl;
 
-        @NotNull
         private AuthType authType;
 
         private String jwtSecret;
@@ -51,8 +52,11 @@ public class AppConfig {
 
     @Data
     public static class RateLimitConfig {
-        private long capacity;
-        private long refillRate;
+        @NotNull
+        private Long capacity;
+
+        @NotNull
+        private Long refillRate;
     }
 
     @Data

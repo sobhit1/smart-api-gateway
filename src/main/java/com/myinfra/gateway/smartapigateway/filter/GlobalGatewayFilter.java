@@ -8,20 +8,19 @@ import com.myinfra.gateway.smartapigateway.service.ProxyService;
 import com.myinfra.gateway.smartapigateway.service.RateLimiter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpMethod;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
-import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.util.AntPathMatcher;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import java.net.InetSocketAddress;
-import java.util.Optional;
 
 /**
  * Global API Gateway filter that enforces routing, authentication,
@@ -48,52 +47,62 @@ public class GlobalGatewayFilter implements GlobalFilter, Ordered {
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         ServerHttpRequest request = exchange.getRequest();
-        ServerHttpResponse response = exchange.getResponse();
         
         String path = request.getURI().getPath();
-        String host = request.getHeaders().getFirst("Host");
 
-        Optional<ProjectConfig> configOpt = projectResolver.resolve(path);
-
-        if (configOpt.isEmpty()) {
-            log.warn("404 - No project matched for host: {} path: {}", host, path);
-            response.setStatusCode(HttpStatus.NOT_FOUND);
-            return response.setComplete();
-        }
-        ProjectConfig config = configOpt.get();
+        ProjectConfig config = projectResolver.resolve(path)
+                .orElseThrow(() ->
+                        new ResponseStatusException(
+                                HttpStatus.NOT_FOUND,
+                                "No route matched for the requested path."
+                        )
+                );
 
         if (Boolean.TRUE.equals(config.isCsrfRequired()) && isWriteRequest(request)) {
             String csrfToken = request.getHeaders().getFirst("X-XSRF-TOKEN");
             if (csrfToken == null || csrfToken.isBlank()) {
-                log.warn("CSRF attempt blocked for path: {}", path);
-                response.setStatusCode(HttpStatus.FORBIDDEN);
-                return response.setComplete();
+                return Mono.error(
+                        new ResponseStatusException(
+                                HttpStatus.FORBIDDEN,
+                                "CSRF token missing or invalid."
+                        )
+                );
             }
         }
 
-        return authService.authenticate(request, config)
-            .switchIfEmpty(Mono.defer(() -> {
-                if (isPublicPath(path, config)) {
-                    return Mono.just(new Identity("anonymous", "ROLE_ANONYMOUS", "FREE"));
-                }
-                return Mono.empty();
-            }))
-            .flatMap(identity -> {
-                String ipAddress = getClientIp(request);
-                return rateLimiter.isAllowed(config, identity, ipAddress)
+        Mono<Identity> identityMono =
+                authService.authenticate(request, config)
+                        .switchIfEmpty(Mono.defer(() -> {
+                            if (isPublicPath(path, config)) {
+                                return Mono.just(
+                                        new Identity("anonymous", "ROLE_ANONYMOUS", "FREE")
+                                );
+                            }
+                            return Mono.error(
+                                    new ResponseStatusException(
+                                            HttpStatus.UNAUTHORIZED,
+                                            "Authentication required."
+                                    )
+                            );
+                        }));
+
+        return identityMono.flatMap(identity -> {
+            String ipAddress = getClientIp(request);
+
+            return rateLimiter.isAllowed(config, identity, ipAddress)
                     .flatMap(allowed -> {
                         if (!allowed) {
-                            response.setStatusCode(HttpStatus.TOO_MANY_REQUESTS);
-                            return response.setComplete();
+                            return Mono.error(
+                                    new ResponseStatusException(
+                                            HttpStatus.TOO_MANY_REQUESTS,
+                                            "Too many requests. Please slow down."
+                                    )
+                            );
                         }
 
                         return proxyService.forward(exchange, config, identity);
                     });
-            })
-            .switchIfEmpty(Mono.defer(() -> {
-                response.setStatusCode(HttpStatus.UNAUTHORIZED);
-                return response.setComplete();
-            }));
+        });
     }
 
     /**
@@ -158,6 +167,6 @@ public class GlobalGatewayFilter implements GlobalFilter, Ordered {
      */
     @Override
     public int getOrder() {
-        return -1;
+        return Ordered.HIGHEST_PRECEDENCE;
     }
 }

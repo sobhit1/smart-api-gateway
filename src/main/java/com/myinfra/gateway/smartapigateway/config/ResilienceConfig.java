@@ -3,7 +3,6 @@ package com.myinfra.gateway.smartapigateway.config;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.timelimiter.TimeLimiterConfig;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.cloud.circuitbreaker.resilience4j.ReactiveResilience4JCircuitBreakerFactory;
 import org.springframework.cloud.circuitbreaker.resilience4j.Resilience4JConfigBuilder;
 import org.springframework.cloud.client.circuitbreaker.Customizer;
@@ -11,8 +10,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.time.Duration;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
-@Slf4j
 @Configuration
 @RequiredArgsConstructor
 public class ResilienceConfig {
@@ -27,36 +28,41 @@ public class ResilienceConfig {
      */
     @Bean
     public Customizer<ReactiveResilience4JCircuitBreakerFactory> defaultCustomizer() {
+
+        Map<String, AppConfig.ProjectConfig> projectByPrefix =
+                appConfig.getProjects() == null
+                        ? Map.of()
+                        : appConfig.getProjects().values().stream()
+                            .collect(Collectors.toMap(
+                                    AppConfig.ProjectConfig::getPrefix,
+                                    Function.identity()
+                            ));
+
         return factory -> factory.configureDefault(id -> {
 
-            AppConfig.ProjectConfig projectConfig = findProjectConfig(id);
+            AppConfig.ProjectConfig projectConfig = projectByPrefix.get(id);
+            AppConfig.CircuitBreakerConfig cb =
+                    projectConfig != null ? projectConfig.getCircuitBreaker() : null;
 
-            float failureRate = 50.0f;
-            Duration waitDuration = Duration.ofSeconds(10);
-            int slidingWindow = 10;
-            int permittedCalls = 3;
+            float failureRateThreshold =
+                    cb != null ? cb.getFailureRateThreshold() : 50.0f;
 
-            if (projectConfig != null) {
-                AppConfig.CircuitBreakerConfig myConfig = projectConfig.getCircuitBreaker();
-                if (myConfig != null) {
-                    failureRate = myConfig.getFailureRateThreshold();
-                    waitDuration = myConfig.getWaitDuration();
-                    slidingWindow = myConfig.getSlidingWindowSize();
-                    permittedCalls = myConfig.getPermittedNumberOfCallsInHalfOpenState();
-                    log.debug("Configuring Circuit Breaker for '{}': failureRate={}%, wait={}s", id, failureRate,
-                            waitDuration.getSeconds());
-                }
-            } else {
-                log.debug("No specific config found for '{}', using defaults.", id);
-            }
+            int slidingWindowSize =
+                    cb != null ? cb.getSlidingWindowSize() : 10;
+
+            int permittedCallsInHalfOpen =
+                    cb != null ? cb.getPermittedNumberOfCallsInHalfOpenState() : 3;
+
+            Duration waitDuration =
+                    cb != null ? cb.getWaitDuration() : Duration.ofSeconds(10);
 
             CircuitBreakerConfig circuitBreakerConfig = CircuitBreakerConfig.custom()
-                    .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
-                    .slidingWindowSize(slidingWindow)
-                    .failureRateThreshold(failureRate)
-                    .waitDurationInOpenState(waitDuration)
-                    .permittedNumberOfCallsInHalfOpenState(permittedCalls)
-                    .build();
+                            .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
+                            .slidingWindowSize(slidingWindowSize)
+                            .failureRateThreshold(failureRateThreshold)
+                            .waitDurationInOpenState(waitDuration)
+                            .permittedNumberOfCallsInHalfOpenState(permittedCallsInHalfOpen)
+                            .build();
 
             TimeLimiterConfig timeLimiterConfig = TimeLimiterConfig.custom()
                     .timeoutDuration(Duration.ofDays(1))
@@ -67,22 +73,5 @@ public class ResilienceConfig {
                     .timeLimiterConfig(timeLimiterConfig)
                     .build();
         });
-    }
-
-    /**
-     * Finds the ProjectConfig by its prefix ID.
-     *
-     * @param id The project prefix
-     * @return The corresponding ProjectConfig or null if not found
-     */
-    private AppConfig.ProjectConfig findProjectConfig(String id) {
-        if (appConfig.getProjects() == null)
-            return null;
-        for (AppConfig.ProjectConfig config : appConfig.getProjects().values()) {
-            if (id.equals(config.getPrefix())) {
-                return config;
-            }
-        }
-        return null;
     }
 }

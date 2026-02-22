@@ -32,9 +32,7 @@ public class RateLimiter {
     public void loadScript() {
         DefaultRedisScript<List<Long>> redisScript = new DefaultRedisScript<>();
         redisScript.setLocation(new ClassPathResource("scripts/request_rate_limiter.lua"));
-        
         redisScript.setResultType((Class<List<Long>>) (Class<?>) List.class);
-        
         this.script = redisScript;
     }
 
@@ -48,19 +46,19 @@ public class RateLimiter {
      * @return Mono<Boolean> - true if allowed
      */
     public Mono<Boolean> isAllowed(ProjectConfig config, Identity identity, String ipAddress) {
+
         if (config.getRateLimit() == null) {
-            return Mono.just(true); 
+            return Mono.just(true);
         }
 
         RateLimitConfig rateConfig = config.getRateLimit();
-        String finalKey = generateKey(config.getPrefix(), identity, ipAddress);
+        String redisKey = generateKey(config.getPrefix(), identity, ipAddress);
 
-        List<String> keys = List.of(finalKey);
+        List<String> keys = List.of(redisKey);
 
         List<String> args = List.of(
                 String.valueOf(rateConfig.getCapacity()),
                 String.valueOf(rateConfig.getRefillRate()),
-                String.valueOf(System.currentTimeMillis()), 
                 "1" 
         );
 
@@ -75,10 +73,8 @@ public class RateLimiter {
                     if (allowedObj instanceof Number n) {
                         return n.longValue() == 1L;
                     }
-
                     return "1".equals(allowedObj.toString());
                 })
-                .doOnError(e -> log.error("Rate Limiter Redis Error: {}", e.getMessage()))
                 .onErrorReturn(true);
     }
 
@@ -95,14 +91,11 @@ public class RateLimiter {
      * @return Redis key for the token bucket
      */
     private String generateKey(String prefix, Identity identity, String ipAddress) {
-        if (identity != null 
-                && identity.id() != null 
-                && !"anonymous".equals(identity.id())) {
-            // Authenticated User: rate_limit:/shop:user:u_123
+
+        if (!"anonymous".equals(identity.id())) {
             return "rate_limit:" + prefix + ":user:" + identity.id();
-        } else {
-            // Unauthenticated (Public) User or Anonymous Identity: rate_limit:/shop:ip:192.168.1.1
-            return "rate_limit:" + prefix + ":ip:" + ipAddress;
         }
+
+        return "rate_limit:" + prefix + ":ip:" + ipAddress;
     }
 }

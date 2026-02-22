@@ -6,8 +6,6 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.reactive.CorsWebFilter;
 import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
 
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 
 @Configuration
@@ -22,26 +20,24 @@ public class CorsConfig {
     public CorsWebFilter corsWebFilter() {
         CorsConfiguration corsConfig = new CorsConfiguration();
 
-        corsConfig.setAllowedOriginPatterns(Collections.singletonList("*"));
+        corsConfig.setAllowedOrigins(List.of(
+                "http://localhost:3000"
+        ));
 
-        corsConfig.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
+        corsConfig.setAllowedMethods(List.of(
+                "GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"
+        ));
 
-        corsConfig.setAllowedHeaders(Arrays.asList(
+        corsConfig.setAllowedHeaders(List.of(
                 "Authorization",
                 "Content-Type",
                 "X-XSRF-TOKEN",
-                "X-User-Id",
-                "X-User-Role",
-                "X-User-Plan",
                 "Accept",
                 "Origin",
                 "X-Requested-With"
         ));
 
-        corsConfig.setExposedHeaders(List.of("X-User-Id", "X-User-Role", "X-User-Plan"));
-
         corsConfig.setAllowCredentials(true);
-
         corsConfig.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

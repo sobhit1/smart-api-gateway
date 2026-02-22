@@ -3,24 +3,26 @@ package com.myinfra.gateway.smartapigateway.service;
 import com.myinfra.gateway.smartapigateway.config.AppConfig.ProjectConfig;
 import com.myinfra.gateway.smartapigateway.model.Identity;
 import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.JwtParserBuilder;
+import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.http.HttpCookie;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import javax.crypto.SecretKey;
-
-import java.security.PublicKey;
-import java.util.Base64;
-
 import java.security.KeyFactory;
+import java.security.PublicKey;
 import java.security.spec.X509EncodedKeySpec;
+import java.util.Base64;
+import java.util.Collection;
 
 @Slf4j
 @Service
@@ -29,7 +31,7 @@ public class AuthService {
 
     private final ReactiveStringRedisTemplate redisTemplate;
 
-     /**
+    /**
      * Authenticates an incoming request based on project configuration.
      *
      * @param request The incoming HTTP request
@@ -59,21 +61,23 @@ public class AuthService {
 
         if (token == null) return Mono.empty();
 
-        try {
-            JwtParserBuilder parserBuilder = Jwts.parser();
+        return Mono.fromCallable(() -> {
+            var parserBuilder = Jwts.parser();
 
             if (config.getJwtPublicKey() != null && !config.getJwtPublicKey().isBlank()) {
                 // Asymmetric (RS256)
                 PublicKey publicKey = parsePublicKey(config.getJwtPublicKey());
                 parserBuilder.verifyWith(publicKey);
-            } else if (config.getJwtSecret() != null) {
+            } else if (config.getJwtSecret() != null && !config.getJwtSecret().isBlank()) {
                 // Symmetric (HS256)
                 byte[] keyBytes = Base64.getDecoder().decode(config.getJwtSecret());
                 SecretKey key = Keys.hmacShaKeyFor(keyBytes);
                 parserBuilder.verifyWith(key);
             } else {
-                log.error("No JWT key configured for project {}", config.getPrefix());
-                return Mono.empty();
+                throw new ResponseStatusException(
+                        HttpStatus.INTERNAL_SERVER_ERROR,
+                        "JWT authentication is misconfigured"
+                );
             }
 
             Claims claims = parserBuilder.build()
@@ -81,23 +85,58 @@ public class AuthService {
                     .getPayload();
 
             String userId = claims.getSubject();
-            String role = claims.get("role", String.class);
+            if (userId == null || userId.isBlank()) {
+                throw new JwtException("JWT subject missing");
+            }
+
+            String role = extractRole(claims);
             String plan = claims.get("plan", String.class);
             if (plan == null) plan = "FREE";
 
-            return Mono.just(new Identity(userId, role, plan));
+            return new Identity(userId, role, plan);
 
-        } catch (Exception e) {
-            log.warn("JWT Validation Failed: {}", e.getMessage());
-            return Mono.empty();
-        }
+        })
+        .subscribeOn(Schedulers.boundedElastic())
+        .onErrorMap(e -> {
+            if (e instanceof JwtException) {
+                return new ResponseStatusException(
+                        HttpStatus.UNAUTHORIZED,
+                        "Invalid or expired authentication token",
+                        e
+                );
+            }
+            if (e instanceof ResponseStatusException) {
+                return e;
+            }
+            return new ResponseStatusException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Error processing authentication",
+                    e
+            );
+        });
     }
 
     /**
-     * Extracts JWT token from either:
-     * - Authorization header (Bearer token)
-     * - Configured cookie (if defined)
-     *
+     * Extracts user role from JWT claims.
+     * @param claims JWT claims
+     * @return User role, or "ROLE_USER" if not found
+     */
+    private String extractRole(Claims claims) {
+        Object roles = claims.get("roles");
+        
+        if (roles instanceof Collection<?> c && !c.isEmpty()) {
+            return c.iterator().next().toString();
+        }
+        if (roles instanceof String s) {
+            return s;
+        }
+
+        String role = claims.get("role", String.class);
+        return (role != null) ? role : "ROLE_USER";
+    }
+
+    /**
+     * Extracts JWT token from the Authorization header or a configured cookie.
      * @param request Incoming HTTP request
      * @param config  Project configuration
      * @return JWT token string or null if not found
@@ -134,8 +173,7 @@ public class AuthService {
 
         byte[] keyBytes = Base64.getDecoder().decode(sanitizedKey);
         X509EncodedKeySpec spec = new X509EncodedKeySpec(keyBytes);
-        KeyFactory kf = KeyFactory.getInstance("RSA");
-        return kf.generatePublic(spec);
+        return KeyFactory.getInstance("RSA").generatePublic(spec);
     }
 
     /**
@@ -164,6 +202,5 @@ public class AuthService {
                 .flatMap(exists -> Boolean.TRUE.equals(exists)
                         ? Mono.just(new Identity("session-user", "ROLE_USER", "FREE"))
                         : Mono.empty());
-
     }
 }
