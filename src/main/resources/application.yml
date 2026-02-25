@@ -66,8 +66,8 @@ app:
         - /smartcity/actuator/**
 
       rate-limit:
-        capacity: 10
-        refill-rate: 5
+        capacity: 3
+        refill-rate: 1
 
       circuit-breaker:
         failure-rate-threshold: 50
@@ -79,17 +79,16 @@ app:
         timeout: 5s
         cancel-running-future: true
 
-    shop:
-      prefix: /shop
-      target-url: http://localhost:8081
+    blogger:
+      prefix: /blogger
+      target-url: https://blogger-tqid.onrender.com
 
       auth-type: JWT
-      jwt-secret: ${SHOP_JWT_SECRET}
+      jwt-secret: ${BLOGGER_JWT_SECRET}
 
       public-paths:
-        - /shop/auth/**
-        - /shop/public/**
-        - /shop/actuator/**
+        - /blogger/auth/**
+        - /blogger/public/**
 
       rate-limit:
         capacity: 15
